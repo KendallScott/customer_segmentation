@@ -45,6 +45,7 @@ select
   else coalesce(stre.indiv_id, ecom.indiv_id) end)                                                                                      as indiv_id,
 sum((coalesce(stre.monthstore_sales,0))+ (coalesce(ecom.monthecom_sales, 0)))                                                           as month_sales,
 sum((coalesce(stre.monthstore_trans,0))+ (coalesce(ecom.monthecom_trans, 0)))                                                           as month_trans,
+sum((coalesce(stre.monthstore_units,0))+ (coalesce(ecom.monthecom_units, 0)))                                                           as month_units,
 monthstore_gm                                                                                                                           as month_store_gm,
 monthstore_sales                                                                                                                        as month_store_sales                                                                                  
 from (select
@@ -52,7 +53,7 @@ from (select
           count(distinct dtl.pos_trans_key)                   as monthstore_trans,
           sum(dtl.extended_sls_amt)                           as monthstore_sales,
           sum(dtl.grs_mrgn_amt)                               as monthstore_gm,
-          sum(dtl.qty)                                        as monthstoreunits
+          sum(dtl.qty)                                        as monthstore_units
          from         ua_pos_trans_dtl dtl
          inner join ua_store str on dtl.loc_key = str.loc_key
          where dtl.wk_idnt between &start_wk_idnt and &end_wk_idnt and dtl.trans_typ_key in(19,22,33) and str.distt_idnt != '999'
@@ -146,6 +147,17 @@ DEFINE end_wk_idnt = '201648';
 DEFINE end_dt = '28dec2016';
 DEFINE mth = '_LY_DEC';
 
+--define TY customer groups
+create table cust_groups_&mth as
+select a.indiv_id,
+a.rolling12trans,
+a.rolling12sales,
+(case when b.indiv_id is null then 'New/React'
+when a.rolling12trans > 0 and a.rolling12trans <= 2 then 'Bottom'
+when a.rolling12trans > 2 and a.rolling12trans <= 5 then 'Middle'
+else 'Top' end) as custgroup
+from rolling12trans_&mth a
+left join rolling12trans_LY_&mth b on a.indiv_id=b.indiv_id;
 
 -----customer attrtibutes-----
 DEFINE start_day_idnt = '2017302';
@@ -154,7 +166,6 @@ DEFINE start_wk_idnt = '201744';
 DEFINE end_wk_idnt = '201748';
 DEFINE end_dt = '30dec2017';
 DEFINE mth = 'DEC';
-
 
 /*Email metrics*/
 --emailed 
@@ -188,7 +199,6 @@ inner join ua_pos_tm_day            d on to_date(c.start_dt) = to_date(d.day_dt)
 inner join ua_pos_tm_day            e on to_date(c.end_dt)   = to_date(e.day_dt)
 where d.wk_idnt <= &end_wk_idnt and e.wk_idnt >= (&end_wk_idnt -100)
 and a.control_cd = 0;
-
 
 /*MVS/LVS*/
 --MVS customers with 50% discount
@@ -267,3 +277,5 @@ DEFINE start_wk_idnt = '201644';
 DEFINE end_wk_idnt = '201648';
 DEFINE end_dt = '28dec2016';
 DEFINE mth = '_LY_DEC';
+
+

@@ -1,0 +1,172 @@
+
+/*Email metrics*/
+--emailed TY
+create table em_&mth as
+select distinct rf.indiv_id                               as indiv_id,
+'emailed'                                                 as emailed
+from monthshoppers_&mth mth
+inner join ua_email_contact_history em on mth.indiv_id = em.indiv_id
+inner join ua_email_ref rf on em.email_id = rf.email_id     
+where em.wk_idnt between (&end_wk_idnt-100 + 1) and &end_wk_idnt
+and em.control_cd = 0;
+
+--email open TY
+create table em_open_&mth as
+select distinct rf.indiv_id                                 as indiv_id,
+'open'                                                      as opens
+from monthshoppers_&mth mth
+inner join ua_email_resolution res on mth.indiv_id = res.indiv_id
+inner join ua_email_ref rf on res.email_id = rf.email_id        
+where res.wk_idnt between (&end_wk_idnt-100 + 1) and &end_wk_idnt
+and res.opened_dt is not null;
+
+--emailed LY
+create table em_LY&mth as
+select distinct rf.indiv_id                                 as indiv_id,
+'emailed'                                                   as emailed
+from monthshoppers_LY_&mth mth
+inner join ua_email_contact_history em on mth.indiv_id = em.indiv_id
+inner join ua_email_ref       rf on em.email_id = rf.email_id        
+where em.wk_idnt between (&end_wk_idnt -200) and (&end_wk_idnt -100 + 1)
+and em.control_cd = 0;
+
+--email open LY
+create table em_open_LY_&mth as
+select distinct rf.indiv_id                                 as indiv_id,
+'opens'                                                     as opens
+from monthshoppers_&mth mth
+inner join ua_email_resolution res on mth.indiv_id = res.indiv_id
+inner join ua_email_ref rf on res.email_id = rf.email_id        
+where res.wk_idnt between (&start_wk_idnt -100) and (&end_wk_idnt -100)
+and res.opened_dt is not null;
+
+
+/*DM metrics*/
+--TY
+create table dm_&mth as
+select distinct b.indiv_id,
+'direct mailed' as direct_mail
+from ua_direct_mail_contact_history a
+inner join ua_individual            b on a.addr_id           = b.addr_id
+inner join ua_campaign              c on a.campaign_id       = c.campaign_id
+inner join ua_pos_tm_day            d on to_date(c.start_dt) = to_date(d.day_dt)
+inner join ua_pos_tm_day            e on to_date(c.end_dt)   = to_date(e.day_dt)
+where d.wk_idnt <= &end_wk_idnt and e.wk_idnt >= (&end_wk_idnt -100)
+and a.control_cd = 0;
+
+--LY
+create table dm_LY_&mth as
+select distinct b.indiv_id,
+'direct mailed' as direct_mail
+from ua_direct_mail_contact_history a
+inner join ua_individual            b on a.addr_id           = b.addr_id
+inner join ua_campaign              c on a.campaign_id       = c.campaign_id
+inner join ua_pos_tm_day            d on to_date(c.start_dt) = to_date(d.day_dt)
+inner join ua_pos_tm_day            e on to_date(c.end_dt)   = to_date(e.day_dt)
+where d.wk_idnt <= (&end_wk_idnt -100) and e.wk_idnt >= (&end_wk_idnt -200)
+and a.control_cd = 0;
+
+
+/*MVS/LVS*/
+--TY
+--MVS customers with 50% discount
+create table mvs_discount_&mth as 
+select distinct indiv_id                                                         
+from UA_POS_TRANS_DTL                                                         
+where UA_POS_TRANS_DTL.DISC_PCT >=50                                                      
+and WK_IDNT between (&end_wk_idnt-100 +1) and &end_wk_idnt;  
+    
+--MVS customers using heavy coupons                                                         
+create table mvs_coupon_&mth as 
+select distinct indiv_id 
+from UA_POS_COUPON_DTL 
+where CPN_UPC_DESC IN  ( 'CPN 30% ENTIRE', 'CPN 50% ERPP  D01', '1CPN 50% AORPI','1CPN 50% D01', 'CPN 25% ENTIRE DEPT 45', 'CPN 60% OFF AORPI', 'CPN 40% ENTIRE', '1CPN 55% AORPI', '1CPN 40% ENTIRE','CPN 50% AORPI  DEPT 45', '1CPN 60% AORPI', '1CPN 30% ENTIRE', '1CPN 25% ENTIRE - ND', '1CPN 30% ENTIRE - ND', 'CPN 50% AORPI', 'CPN 50% D01', '30% ENTIRE (ENTIRE, INCLUDING', '1CPN 40% ERPP', '1CPN 50% AORPI DEPT 45', 'CPN 55% AORPI', '1CPN 60% ERPP', '1CPN 60% OFF AORPI') 
+and WK_IDNT between (&end_wk_idnt-100 +1) and &end_wk_idnt;         
+
+--lifetime discount amount dimension  
+create table mvs_disc_amt_&mth as
+select indiv_id,
+sum(extended_sls_amt) as sales,
+(sum(disc_amt) * -1) as disc_amt
+from ua_pos_trans_dtl
+where wk_idnt<=&end_wk_idnt
+group by indiv_id;
+ 
+create table allcust_avg_disc_&mth as
+select indiv_id,
+sales,
+disc_amt,
+(sales+disc_amt) as total_sale
+from mvs_disc_amt_&mthty;
+
+create table allcust_disc_pct_&mth as
+select indiv_id,
+(disc_amt/total_sale) as disc_pct_ttl
+from allcust_avg_disc_&mth
+where total_sale != 0;
+
+create table mvs_all_&mthty as
+select distinct indiv_id
+from (select distinct indiv_id from mvs_discount_&mth)
+union (select distinct indiv_id from mvs_coupon_&mth)
+union (select distinct indiv_id from allcust_disc_pct_&mth where disc_pct_ttl >= 0.3);
+
+--classify all customers in TY dataset to MVS or LVS
+create table value_segment_&mth as
+select distinct a.indiv_id
+,(case when b.indiv_id is not null then 'MVS' else 'LVS' end) as value_segment_ty
+from rolling12trans_&mth a
+left join mvs_all_&mth b on a.indiv_id = b.indiv_id;
+
+--LY
+--MVS customers with 50% discount
+create table mvs_discount_&mth as 
+select distinct indiv_id                                                         
+from UA_POS_TRANS_DTL                                                         
+where UA_POS_TRANS_DTL.DISC_PCT >=50                                                      
+and WK_IDNT between (&end_wk_idnt-100 +1) and &end_wk_idnt;
+    
+--MVS customers using heavy coupons                                                         
+create table mvs_coupon_&mth as 
+select distinct indiv_id 
+from UA_POS_COUPON_DTL 
+where CPN_UPC_DESC IN  ( 'CPN 30% ENTIRE', 'CPN 50% ERPP  D01', '1CPN 50% AORPI','1CPN 50% D01', 'CPN 25% ENTIRE DEPT 45', 'CPN 60% OFF AORPI', 'CPN 40% ENTIRE', '1CPN 55% AORPI', '1CPN 40% ENTIRE','CPN 50% AORPI  DEPT 45', '1CPN 60% AORPI', '1CPN 30% ENTIRE', '1CPN 25% ENTIRE - ND', '1CPN 30% ENTIRE - ND', 'CPN 50% AORPI', 'CPN 50% D01', '30% ENTIRE (ENTIRE, INCLUDING', '1CPN 40% ERPP', '1CPN 50% AORPI DEPT 45', 'CPN 55% AORPI', '1CPN 60% ERPP', '1CPN 60% OFF AORPI') 
+and WK_IDNT between (&end_wk_idnt-100 +1) and &end_wk_idnt;        
+
+--lifetime discount amount dimension  
+create table mvs_disc_amt_&mth as
+select indiv_id,
+sum(extended_sls_amt) as sales,
+(sum(disc_amt) * -1) as disc_amt
+from ua_pos_trans_dtl
+where wk_idnt<=&end_wk_ly
+group by indiv_id;
+ 
+create table allcust_avg_disc_&mth as
+select indiv_id,
+sales,
+disc_amt,
+(sales+disc_amt) as total_sale
+from mvs_disc_amt_&mthly;
+
+create table allcust_disc_pct_&mth as
+select indiv_id,
+(disc_amt/total_sale) as disc_pct_ttl
+from allcust_avg_disc_&mthly
+where total_sale != 0;
+
+create table mvs_all_&mth as
+select distinct indiv_id
+from 
+(select distinct indiv_id from mvs_discount_&mthly)
+union
+(select distinct indiv_id from mvs_coupon_&mthly)
+union
+(select distinct indiv_id from allcust_disc_pct_&mthly where disc_pct_ttl >= 0.3);
+
+--classify all customers in TY dataset to MVS or LVS
+create table value_segment_&mth as
+select distinct a.indiv_id
+,(case when b.indiv_id is not null then 'MVS' else 'LVS' end) as value_segment_ly
+from rolling12trans_&mthly a
+left join mvs_all_&mthly b on a.indiv_id = b.indiv_id;
